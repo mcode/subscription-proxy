@@ -9,6 +9,43 @@ const BACKPORT_TOPIC_EXTENSION =
   'http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-topic-canonical';
 
 /**
+ * Create the BackportSubscriptionStatus Parameters resource
+ *
+ * @param {Subscription} subscription - the subscription to get the status of
+ * @param {string} type - 'handshake', 'heartbeat', 'event-notification', or 'query-status'
+ * @returns Parameters resource defining the status of the subscription
+ */
+function createSubscriptionStatus(subscription, type) {
+  const topicExtension = subscription.extension.find((e) => e.url === BACKPORT_TOPIC_EXTENSION);
+
+  return {
+    resourceType: 'Parameters',
+    id: uuidv4(),
+    meta: {
+      profile: [
+        'http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-subscriptionstatus',
+      ],
+    },
+    parameter: [
+      {
+        name: 'subscription',
+        valueReference: {
+          reference: `${fhirServerConfig.auth.resourceServer}/Subscription/${subscription.id}`,
+        },
+      },
+      {
+        name: 'topic',
+        valueCanonical: topicExtension.valueUri,
+      },
+      {
+        name: 'type',
+        valueCode: type,
+      },
+    ],
+  };
+}
+
+/**
  * Send a notification with the triggering resources as defined in the subscription
  *
  * @param {Resource[]} resources - list of triggering resources to send in notification
@@ -59,43 +96,6 @@ function sendNotification(resources, subscription) {
   });
 
   return axios.post(subscription.channel.endpoint, notificationBundle, { headers: headers });
-}
-
-/**
- * Create the BackportSubscriptionStatus Parameters resource
- *
- * @param {Subscription} subscription - the subscription to get the status of
- * @param {string} type - 'handshake', 'heartbeat', 'event-notification', or 'query-status'
- * @returns Parameters resource defining the status of the subscription
- */
-function createSubscriptionStatus(subscription, type) {
-  const topicExtension = subscription.extension.find((e) => e.url === BACKPORT_TOPIC_EXTENSION);
-
-  return {
-    resourceType: 'Parameters',
-    id: uuidv4(),
-    meta: {
-      profile: [
-        'http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-subscriptionstatus',
-      ],
-    },
-    parameter: [
-      {
-        name: 'subscription',
-        valueReference: {
-          reference: `${fhirServerConfig.auth.resourceServer}/Subscription/${subscription.id}`,
-        },
-      },
-      {
-        name: 'topic',
-        valueCanonical: topicExtension.valueUri,
-      },
-      {
-        name: 'type',
-        valueCode: type,
-      },
-    ],
-  };
 }
 
 module.exports = { sendNotification, createSubscriptionStatus };
