@@ -45,6 +45,7 @@ module.exports.create = (_args, { req }) => {
     }
     if (!resource.id) resource.id = uuidv4();
     db.insert(SUBSCRIPTION, resource);
+
     resolve({ id: resource.id });
   });
 };
