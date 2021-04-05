@@ -1,6 +1,7 @@
 const { loggers } = require('@asymmetrik/node-fhir-server-core');
 const mkFhir = require('fhir.js');
 const config = require('config');
+const { v4: uuidv4 } = require('uuid');
 const db = require('../storage/DataAccess');
 const topiclist = require('../../public/topiclist.json');
 const { getAccessToken } = require('./client');
@@ -12,19 +13,54 @@ const fhirClientConfig = config.fhirClientConfig;
 const TOPIC_URL = 'http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-topic-canonical';
 
 /**
- *
- * @param {String} topic - Subscription topic from topiclist
+ * @param {String} resourceToPoll - resource to query for
+ * @param {String} lastUpdated - date to query resources since they were last updated
  * @returns {Object} - returns a FHIR search query object
  */
-function getSearchQuery(topic) {
-  if (topic.includes('encounter')) return { type: 'Encounter' };
-  if (topic.includes('diagnosis')) return { type: 'Condition' };
-  if (topic.includes('medication')) return { type: 'Medication' };
-  if (topic.includes('labresult')) return { type: 'Observation', query: { category: 'laboratory' } };
-  if (topic.includes('order')) return { type: 'ServiceRequest' };
-  if (topic.includes('procedure')) return { type: 'Procedure' };
-  if (topic.includes('immunization')) return { type: 'Immunization' };
-  if (topic === 'demographic-change') return { type: 'Patient' };
+function getSearchQuery(resourceToPoll, lastUpdated) {
+  const query = {};
+  if (lastUpdated) query._lastUpdated = `gt${lastUpdated}`;
+  if (resourceToPoll === 'Observation') query.category = 'laboratory';
+
+  return { type: resourceToPoll, query};
+}
+
+/**
+ * Take a named event code and return the resource type the named event will subscribe to.
+ * This is not quite the Subscription.criteria string but will be used to construct that.
+ *
+ * @param {string} namedEvent - the named event code
+ * @returns the resource type which will trigger a notification for the named event
+ */
+function namedEventToResourceType(namedEvent) {
+  const parts = namedEvent.split('-');
+
+  let resource;
+  if (parts[0] === 'new' || parts[0] === 'modified') resource = parts[1];
+  else if (parts[1] === 'change' || parts[1] === 'start' || parts[1] === 'close')
+    resource = parts[0];
+  else return null;
+
+  switch (resource) {
+    case 'encounter':
+      return 'Encounter';
+    case 'diagnosis':
+      return 'Condition';
+    case 'medication':
+      return 'Medication';
+    case 'labresult':
+      return 'Observation';
+    case 'order':
+      return 'ServiceRequest';
+    case 'procedure':
+      return 'Procedure';
+    case 'immunization':
+      return 'Immunization';
+    case 'demographic':
+      return 'Patient';
+    default:
+      return null;
+  }
 }
 
 async function pollSubscriptionTopics() {
@@ -36,45 +72,56 @@ async function pollSubscriptionTopics() {
     (s) => s.extension && s.extension.some((e) => e.url === TOPIC_URL)
   );
 
-  // Remove duplicates with Set so we don't poll twice for same topic
-  const topicsToPoll = [
+  // Map topics to resources and remove duplicates with Set so we only poll once for each resource
+  const resourcesToPoll = [
     ...new Set(
-      subscriptions.map((s) => {
-        const topicExtension = s.extension.find((e) => e.url === TOPIC_URL);
-
-        return topiclist.parameter.find(p => p.valueCanonical === topicExtension.valueUri).name;
-      })
+      subscriptions
+        .map((s) => {
+          const topicExtension = s.extension.find((e) => e.url === TOPIC_URL);
+          return topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
+        })
+        .map((t) => namedEventToResourceType(t))
     ),
   ];
 
-  if (topicsToPoll.length === 0) {
+  if (resourcesToPoll.length === 0) {
     logger.info('No subscription topics to poll.');
     return;
   }
 
   const { baseUrl, clientId } = fhirClientConfig;
   const accessToken = await getAccessToken(baseUrl, clientId);
-  topicsToPoll.forEach((topic) => {
-    logger.info(`Polling EHR for ${topic}.`);
+  resourcesToPoll.forEach((resourceToPoll) => {
     const options = {
       baseUrl,
       auth: { bearer: accessToken },
     };
 
+    const mostRecentPoll = db.select('polling', (p) => p.resource === resourceToPoll);
+    const lastUpdated = mostRecentPoll.length === 0 ? null : mostRecentPoll[0].timestamp;
+    logger.info(`Polling EHR for ${resourceToPoll} resources last updated since ${lastUpdated}.`);
     const fhirClient = mkFhir(options);
     fhirClient
-      .search(getSearchQuery(topic))
+      .search(getSearchQuery(resourceToPoll, lastUpdated))
       .then((response) => {
         const { data } = response;
 
+        // Add poll to DB
+        const poll = {
+          id: uuidv4(),
+          timestamp: new Date().toISOString(),
+          resource: resourceToPoll
+        };
+        db.upsert('polling', poll, (p) => p.resource === resourceToPoll);
+
         // Store fetched resources in local database
         if (data.total > 0) {
-          logger.info(`Storing ${data.total} fetched resources for ${topic} into database.`);
+          logger.info(`Storing ${data.total} fetched resource(s) for ${resourceToPoll} into database.`);
           const resources = data.entry.map(entry => entry.resource);
 
           resources.forEach((resource) => {
             const collection = `${resource.resourceType.toLowerCase()}s`;
-            db.upsert(collection, resource, r => r.id === resource.id);
+            db.insert(collection, resource);
           });
         }
       })
