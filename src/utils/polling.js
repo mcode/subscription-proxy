@@ -72,32 +72,32 @@ async function pollSubscriptionTopics() {
     (s) => s.extension && s.extension.some((e) => e.url === TOPIC_URL)
   );
 
-  // Remove duplicates with Set so we don't poll twice for same topic
-  const topicsToPoll = [
+  // Map topics to resources and remove duplicates with Set so we only poll once for each resource
+  const resourcesToPoll = [
     ...new Set(
-      subscriptions.map((s) => {
-        const topicExtension = s.extension.find((e) => e.url === TOPIC_URL);
-
-        return topiclist.parameter.find(p => p.valueCanonical === topicExtension.valueUri).name;
-      })
+      subscriptions
+        .map((s) => {
+          const topicExtension = s.extension.find((e) => e.url === TOPIC_URL);
+          return topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
+        })
+        .map((t) => namedEventToResourceType(t))
     ),
   ];
 
-  if (topicsToPoll.length === 0) {
+  if (resourcesToPoll.length === 0) {
     logger.info('No subscription topics to poll.');
     return;
   }
 
   const { baseUrl, clientId } = fhirClientConfig;
   const accessToken = await getAccessToken(baseUrl, clientId);
-  topicsToPoll.forEach((topic) => {
-    logger.info(`Polling EHR for ${topic}.`);
+  resourcesToPoll.forEach((resourceToPoll) => {
+    logger.info(`Polling EHR for ${resourceToPoll} resources.`);
     const options = {
       baseUrl,
       auth: { bearer: accessToken },
     };
 
-    const resourceToPoll = namedEventToResourceType(topic);
     const mostRecentPoll = db.select('polling', (p) => p.resource === resourceToPoll);
     const lastUpdated = mostRecentPoll.length === 0 ? null : mostRecentPoll[0].timestamp;
     const fhirClient = mkFhir(options);
@@ -116,7 +116,7 @@ async function pollSubscriptionTopics() {
 
         // Store fetched resources in local database
         if (data.total > 0) {
-          logger.info(`Storing ${data.total} fetched resource(s) for ${topic} into database.`);
+          logger.info(`Storing ${data.total} fetched resource(s) for ${resourceToPoll} into database.`);
           const resources = data.entry.map(entry => entry.resource);
 
           resources.forEach((resource) => {
