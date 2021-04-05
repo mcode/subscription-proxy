@@ -92,7 +92,6 @@ async function pollSubscriptionTopics() {
   const { baseUrl, clientId } = fhirClientConfig;
   const accessToken = await getAccessToken(baseUrl, clientId);
   resourcesToPoll.forEach((resourceToPoll) => {
-    logger.info(`Polling EHR for ${resourceToPoll} resources.`);
     const options = {
       baseUrl,
       auth: { bearer: accessToken },
@@ -100,6 +99,7 @@ async function pollSubscriptionTopics() {
 
     const mostRecentPoll = db.select('polling', (p) => p.resource === resourceToPoll);
     const lastUpdated = mostRecentPoll.length === 0 ? null : mostRecentPoll[0].timestamp;
+    logger.info(`Polling EHR for ${resourceToPoll} resources last updated since ${lastUpdated}.`);
     const fhirClient = mkFhir(options);
     fhirClient
       .search(getSearchQuery(resourceToPoll, lastUpdated))
