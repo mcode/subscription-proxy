@@ -2,7 +2,6 @@ const { loggers } = require('@asymmetrik/node-fhir-server-core');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../storage/DataAccess');
 const topiclist = require('../../public/topiclist.json');
-const { sendNotification } = require('../utils/subscriptions');
 
 const logger = loggers.get('default');
 const SUBSCRIPTION = 'subscriptions';
@@ -47,25 +46,6 @@ module.exports.create = (_args, { req }) => {
     if (!resource.id) resource.id = uuidv4();
     db.insert(SUBSCRIPTION, resource);
 
-    // TODO: just for testing purpose remove after PR
-    const encounter = {
-      resourceType: 'Encounter',
-      id: 'enc1',
-      text: {
-        status: 'generated',
-        div: '<div xmlns="http://www.w3.org/1999/xhtml">Encounter with patient @example</div>',
-      },
-      status: 'in-progress',
-      class: {
-        system: 'http://terminology.hl7.org/CodeSystem/v3-ActCode',
-        code: 'IMP',
-        display: 'inpatient encounter',
-      },
-      subject: {
-        reference: 'Patient/pat01',
-      },
-    };
-    sendNotification([encounter], resource);
     resolve({ id: resource.id });
   });
 };
