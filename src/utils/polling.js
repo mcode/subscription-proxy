@@ -109,7 +109,7 @@ async function pollSubscriptionTopics() {
         // Add poll to DB
         const poll = {
           id: uuidv4(),
-          timestamp: new Date(Date.now()).toISOString(),
+          timestamp: new Date().toISOString(),
           resource: resourceToPoll
         };
         db.insert('polling', poll);
