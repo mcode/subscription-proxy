@@ -112,11 +112,11 @@ async function pollSubscriptionTopics() {
           timestamp: new Date().toISOString(),
           resource: resourceToPoll
         };
-        db.insert('polling', poll);
+        db.upsert('polling', poll, (p) => p.resource === resourceToPoll);
 
         // Store fetched resources in local database
         if (data.total > 0) {
-          logger.info(`Storing ${data.total} fetched resources for ${topic} into database.`);
+          logger.info(`Storing ${data.total} fetched resource(s) for ${topic} into database.`);
           const resources = data.entry.map(entry => entry.resource);
 
           resources.forEach((resource) => {
