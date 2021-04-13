@@ -169,7 +169,7 @@ async function pollSubscriptionTopics() {
             if (storedResource.length === 0) newResources.push(resource);
             else modifiedResources.push(resource);
 
-            db.insert(collection, resource);
+            db.upsert(collection, { id: resource.id }, r => r.id === resource.id);
           });
         }
 
