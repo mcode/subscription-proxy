@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../storage/DataAccess');
 const topiclist = require('../../public/topiclist.json');
 const { getAccessToken } = require('./client');
+const { sendNotification } = require('./subscriptions');
 
 const logger = loggers.get('default');
 const SUBSCRIPTION = 'subscriptions';
@@ -114,6 +115,9 @@ async function pollSubscriptionTopics() {
         };
         db.upsert('polling', poll, (p) => p.resource === resourceToPoll);
 
+        const newResources = [];
+        const modifiedResources = [];
+
         // Store fetched resources in local database
         if (data.total > 0) {
           logger.info(`Storing ${data.total} fetched resource(s) for ${resourceToPoll} into database.`);
@@ -121,9 +125,39 @@ async function pollSubscriptionTopics() {
 
           resources.forEach((resource) => {
             const collection = `${resource.resourceType.toLowerCase()}s`;
+
+            // Determine if resource is new before inserting
+            const storedResource = db.select(collection, r => r.id === resource.id);
+            if (storedResource.length === 0) newResources.push(resource);
+            else modifiedResources.push(resource);
+
             db.insert(collection, resource);
           });
         }
+
+        // Filter subscriptions that are looking for changes in the currently polled resource
+        const filteredSubscriptions = subscriptions.filter((s) => {
+          const topicExtension = s.extension.find((e) => e.url === TOPIC_URL);
+          const topicName = topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
+          return namedEventToResourceType(topicName) === resourceToPoll;
+        });
+
+        // Determine if we should send notification for each subscription
+        filteredSubscriptions.forEach((sub) => {
+          const topicExtension = sub.extension.find((e) => e.url === TOPIC_URL);
+          const topicName = topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
+
+          if (topicName.includes('new') && newResources.length > 0) {
+            logger.info(`Sending notification for ${topicName}`);
+            sendNotification(newResources, sub);
+          } else if (topicName.includes('modified') && modifiedResources.length > 0) {
+            logger.info(`Sending notification for ${topicName}`);
+            sendNotification(modifiedResources, sub);
+          } else if (topicName.includes('change') && (newResources.length > 0 || modifiedResources.length > 0)) {
+            logger.info(`Sending notification for ${topicName}`);
+            sendNotification(newResources.concat(modifiedResources), sub);
+          }
+        });
       })
       .catch((err) => logger.error(err));
   });
