@@ -10,7 +10,8 @@ process.env.ALLOW_CONFIG_MUTATIONS = true;
 
 const config = require('config');
 
-const fhirServerConfig = config.get('fhirServerConfig').resolve();
+let fhirServerConfig = config.get('fhirServerConfig');
+if (fhirServerConfig.resolve) fhirServerConfig = fhirServerConfig.resolve();
 
 const main = function () {
   const server = new Server(fhirServerConfig);

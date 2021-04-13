@@ -64,6 +64,44 @@ function namedEventToResourceType(namedEvent) {
   }
 }
 
+/**
+ * Returns topic name from Subscription
+ *
+ * @param {Subscription} subscription - Subscription resource
+ * @returns {String} - topic name
+ */
+function getTopicName(subscription) {
+  const topicExtension = subscription.extension.find((e) => e.url === TOPIC_URL);
+  return topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
+}
+
+/**
+ * Sends notifications(if necessary) each subscription based on new and modified resources
+ *
+ * @param {Subscription[]} subscriptions List of Subscriptions
+ * @param {Resource[]} newResources List of new resources polled from EHR
+ * @param {Resource[]} modifiedResources List of modified resources polled from EHR
+ */
+function sendSubscriptionNotifications(subscriptions, newResources, modifiedResources) {
+  subscriptions.forEach((sub) => {
+    const topicName = getTopicName(sub);
+
+    if (topicName.includes('new') && newResources.length > 0) {
+      logger.info(`Sending notification for ${topicName}`);
+      sendNotification(newResources, sub);
+    } else if (topicName.includes('modified') && modifiedResources.length > 0) {
+      logger.info(`Sending notification for ${topicName}`);
+      sendNotification(modifiedResources, sub);
+    } else if (topicName.includes('change') && (newResources.length > 0 || modifiedResources.length > 0)) {
+      logger.info(`Sending notification for ${topicName}`);
+      sendNotification(newResources.concat(modifiedResources), sub);
+    }
+  });
+}
+
+/**
+ * Poll resources from EHR based on subscription topics and sends notifications if necessary
+ */
 async function pollSubscriptionTopics() {
   logger.info('Polling Subscription topics');
 
@@ -135,29 +173,12 @@ async function pollSubscriptionTopics() {
           });
         }
 
-        // Filter subscriptions that are looking for changes in the currently polled resource
-        const filteredSubscriptions = subscriptions.filter((s) => {
-          const topicExtension = s.extension.find((e) => e.url === TOPIC_URL);
-          const topicName = topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
-          return namedEventToResourceType(topicName) === resourceToPoll;
-        });
-
-        // Determine if we should send notification for each subscription
-        filteredSubscriptions.forEach((sub) => {
-          const topicExtension = sub.extension.find((e) => e.url === TOPIC_URL);
-          const topicName = topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
-
-          if (topicName.includes('new') && newResources.length > 0) {
-            logger.info(`Sending notification for ${topicName}`);
-            sendNotification(newResources, sub);
-          } else if (topicName.includes('modified') && modifiedResources.length > 0) {
-            logger.info(`Sending notification for ${topicName}`);
-            sendNotification(modifiedResources, sub);
-          } else if (topicName.includes('change') && (newResources.length > 0 || modifiedResources.length > 0)) {
-            logger.info(`Sending notification for ${topicName}`);
-            sendNotification(newResources.concat(modifiedResources), sub);
-          }
-        });
+        // Don't send notifications on first poll
+        if (mostRecentPoll.length > 0) {
+          // Filter subscriptions that are looking for changes in the currently polled resource
+          const filteredSubscriptions = subscriptions.filter(s => namedEventToResourceType(getTopicName(s)) === resourceToPoll);
+          sendSubscriptionNotifications(filteredSubscriptions, newResources, modifiedResources);
+        }
       })
       .catch((err) => logger.error(err));
   });
