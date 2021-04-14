@@ -3,8 +3,7 @@ const config = require('config');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../storage/DataAccess');
 
-let fhirServerConfig = config.get('fhirServerConfig');
-if (fhirServerConfig.resolve) fhirServerConfig = fhirServerConfig.resolve();
+const fhirServerConfig = config.get('fhirServerConfig');
 
 const SUBSCRIPTION = 'subscriptions';
 const BACKPORT_TOPIC_EXTENSION =
