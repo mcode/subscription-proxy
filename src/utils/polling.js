@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../storage/DataAccess');
 const topiclist = require('../../public/topiclist.json');
 const { getAccessToken } = require('./client');
+const { sendNotification } = require('./subscriptions');
 
 const logger = loggers.get('default');
 const SUBSCRIPTION = 'subscriptions';
@@ -63,6 +64,109 @@ function namedEventToResourceType(namedEvent) {
   }
 }
 
+/**
+ * Returns topic name from Subscription
+ *
+ * @param {Subscription} subscription - Subscription resource
+ * @returns {String | null} - topic name
+ */
+function getTopicName(subscription) {
+  if (!subscription.extension) return null;
+
+  const topicExtension = subscription.extension.find((e) => e.url === TOPIC_URL);
+  return !topicExtension ? null : topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
+}
+
+/**
+ * Sends notifications(if necessary) each subscription based on new and modified resources
+ *
+ * @param {Subscription[]} subscriptions List of Subscriptions
+ * @param {Resource[]} newResources List of new resources polled from EHR
+ * @param {Resource[]} modifiedResources List of modified resources polled from EHR
+ */
+function sendSubscriptionNotifications(subscriptions, newResources, modifiedResources) {
+  subscriptions.forEach((sub) => {
+    const topicName = getTopicName(sub);
+
+    if (topicName.includes('new') && newResources.length > 0) {
+      logger.info(`Sending notification for ${topicName}`);
+      sendNotification(newResources, sub);
+    } else if (topicName.includes('modified') && modifiedResources.length > 0) {
+      logger.info(`Sending notification for ${topicName}`);
+      sendNotification(modifiedResources, sub);
+    } else if (topicName.includes('change') && (newResources.length > 0 || modifiedResources.length > 0)) {
+      logger.info(`Sending notification for ${topicName}`);
+      sendNotification(newResources.concat(modifiedResources), sub);
+    }
+  });
+}
+
+/**
+ * Adds poll to DB
+ *
+ * @param {Resource} resource - Resource
+ */
+function addPollToDb(resource) {
+  const poll = {
+    id: uuidv4(),
+    timestamp: new Date().toISOString(),
+    resource,
+  };
+  db.upsert('polling', poll, (p) => p.resource === resource);
+}
+
+/**
+ * Perform an initial poll if resource has not already been polled
+ *
+ * @param {Subscription} subscription - Subscription resource
+ */
+async function initialPoll(subscription) {
+  const topicName = getTopicName(subscription);
+  if (!topicName) {
+    logger.info('Initial poll not needed for subscription without topic.');
+    return;
+  }
+
+  const resourceToPoll = namedEventToResourceType(topicName);
+
+  // Don't poll if resource is already being polled for.
+  const mostRecentPoll = db.select('polling', (p) => p.resource === resourceToPoll);
+  if (mostRecentPoll.length > 0) {
+    logger.info(`${resourceToPoll} resource is already being polled.`);
+    return;
+  }
+
+  const { baseUrl, clientId } = fhirClientConfig;
+  const accessToken = await getAccessToken(baseUrl, clientId);
+  const options = {
+    baseUrl,
+    auth: { bearer: accessToken },
+  };
+
+  const fhirClient = mkFhir(options);
+  fhirClient
+    .search(getSearchQuery(resourceToPoll))
+    .then((response) => {
+      const { data } = response;
+      addPollToDb(resourceToPoll);
+
+      // Store fetched resources in local database
+      if (data.total > 0) {
+        logger.info(`Storing ${data.total} fetched resource(s) for ${resourceToPoll} into database.`);
+        const resources = data.entry.map(entry => entry.resource);
+
+        resources.forEach((resource) => {
+          const collection = `${resource.resourceType.toLowerCase()}s`;
+          db.upsert(collection, { id: resource.id }, r => r.id === resource.id);
+        });
+      }
+    })
+    .catch((err) => logger.error(err));
+}
+
+/**
+ * Poll resources from EHR based on subscription topics and sends notifications if necessary
+ */
 async function pollSubscriptionTopics() {
   logger.info('Polling Subscription topics');
 
@@ -105,14 +209,9 @@ async function pollSubscriptionTopics() {
       .search(getSearchQuery(resourceToPoll, lastUpdated))
       .then((response) => {
         const { data } = response;
-
-        // Add poll to DB
-        const poll = {
-          id: uuidv4(),
-          timestamp: new Date().toISOString(),
-          resource: resourceToPoll
-        };
-        db.upsert('polling', poll, (p) => p.resource === resourceToPoll);
+        addPollToDb(resourceToPoll);
+        const newResources = [];
+        const modifiedResources = [];
 
         // Store fetched resources in local database
         if (data.total > 0) {
@@ -121,12 +220,22 @@ async function pollSubscriptionTopics() {
 
           resources.forEach((resource) => {
             const collection = `${resource.resourceType.toLowerCase()}s`;
-            db.insert(collection, resource);
+
+            // Determine if resource is new before inserting
+            const storedResource = db.select(collection, r => r.id === resource.id);
+            if (storedResource.length === 0) newResources.push(resource);
+            else modifiedResources.push(resource);
+
+            db.upsert(collection, { id: resource.id }, r => r.id === resource.id);
           });
         }
+
+        // Filter subscriptions that are looking for changes in the currently polled resource
+        const filteredSubscriptions = subscriptions.filter(s => namedEventToResourceType(getTopicName(s)) === resourceToPoll);
+        sendSubscriptionNotifications(filteredSubscriptions, newResources, modifiedResources);
       })
       .catch((err) => logger.error(err));
   });
 }
 
-module.exports = { pollSubscriptionTopics };
+module.exports = { pollSubscriptionTopics, initialPoll };
