@@ -2,6 +2,7 @@ const { loggers } = require('@asymmetrik/node-fhir-server-core');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../storage/DataAccess');
 const topiclist = require('../../public/topiclist.json');
+const { initialPoll } = require('../utils/polling');
 
 const logger = loggers.get('default');
 const SUBSCRIPTION = 'subscriptions';
@@ -45,6 +46,9 @@ module.exports.create = (_args, { req }) => {
     }
     if (!resource.id) resource.id = uuidv4();
     db.insert(SUBSCRIPTION, resource);
+
+    // Initial poll for new subscription
+    initialPoll(resource);
 
     resolve({ id: resource.id });
   });

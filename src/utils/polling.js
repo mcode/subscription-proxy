@@ -68,11 +68,13 @@ function namedEventToResourceType(namedEvent) {
  * Returns topic name from Subscription
  *
  * @param {Subscription} subscription - Subscription resource
- * @returns {String} - topic name
+ * @returns {String | null} - topic name
  */
 function getTopicName(subscription) {
+  if (!subscription.extension) return null;
+
   const topicExtension = subscription.extension.find((e) => e.url === TOPIC_URL);
-  return topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
+  return !topicExtension ? null : topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
 }
 
 /**
@@ -97,6 +99,69 @@ function sendSubscriptionNotifications(subscriptions, newResources, modifiedReso
       sendNotification(newResources.concat(modifiedResources), sub);
     }
   });
+}
+
+/**
+ * Adds poll to DB
+ *
+ * @param {Resource} resource - Resource
+ */
+function addPollToDb(resource) {
+  const poll = {
+    id: uuidv4(),
+    timestamp: new Date().toISOString(),
+    resource,
+  };
+  db.upsert('polling', poll, (p) => p.resource === resource);
+}
+
+/**
+ * Perform an initial poll if resource has not already been polled
+ *
+ * @param {Subscription} subscription - Subscription resource
+ */
+async function initialPoll(subscription) {
+  const topicName = getTopicName(subscription);
+  if (!topicName) {
+    logger.info('Initial poll not needed for subscription without topic.');
+    return;
+  }
+
+  const resourceToPoll = namedEventToResourceType(topicName);
+
+  // Don't poll if resource is already being polled for.
+  const mostRecentPoll = db.select('polling', (p) => p.resource === resourceToPoll);
+  if (mostRecentPoll.length > 0) {
+    logger.info(`${resourceToPoll} resource is already being polled.`);
+    return;
+  }
+
+  const { baseUrl, clientId } = fhirClientConfig;
+  const accessToken = await getAccessToken(baseUrl, clientId);
+  const options = {
+    baseUrl,
+    auth: { bearer: accessToken },
+  };
+
+  const fhirClient = mkFhir(options);
+  fhirClient
+    .search(getSearchQuery(resourceToPoll))
+    .then((response) => {
+      const { data } = response;
+      addPollToDb(resourceToPoll);
+
+      // Store fetched resources in local database
+      if (data.total > 0) {
+        logger.info(`Storing ${data.total} fetched resource(s) for ${resourceToPoll} into database.`);
+        const resources = data.entry.map(entry => entry.resource);
+
+        resources.forEach((resource) => {
+          const collection = `${resource.resourceType.toLowerCase()}s`;
+          db.upsert(collection, { id: resource.id }, r => r.id === resource.id);
+        });
+      }
+    })
+    .catch((err) => logger.error(err));
 }
 
 /**
@@ -144,15 +209,7 @@ async function pollSubscriptionTopics() {
       .search(getSearchQuery(resourceToPoll, lastUpdated))
       .then((response) => {
         const { data } = response;
-
-        // Add poll to DB
-        const poll = {
-          id: uuidv4(),
-          timestamp: new Date().toISOString(),
-          resource: resourceToPoll
-        };
-        db.upsert('polling', poll, (p) => p.resource === resourceToPoll);
-
+        addPollToDb(resourceToPoll);
         const newResources = [];
         const modifiedResources = [];
 
@@ -173,15 +230,12 @@ async function pollSubscriptionTopics() {
           });
         }
 
-        // Don't send notifications on first poll
-        if (mostRecentPoll.length > 0) {
-          // Filter subscriptions that are looking for changes in the currently polled resource
-          const filteredSubscriptions = subscriptions.filter(s => namedEventToResourceType(getTopicName(s)) === resourceToPoll);
-          sendSubscriptionNotifications(filteredSubscriptions, newResources, modifiedResources);
-        }
+        // Filter subscriptions that are looking for changes in the currently polled resource
+        const filteredSubscriptions = subscriptions.filter(s => namedEventToResourceType(getTopicName(s)) === resourceToPoll);
+        sendSubscriptionNotifications(filteredSubscriptions, newResources, modifiedResources);
       })
       .catch((err) => logger.error(err));
   });
 }
 
-module.exports = { pollSubscriptionTopics };
+module.exports = { pollSubscriptionTopics, initialPoll };
