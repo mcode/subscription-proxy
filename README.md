@@ -4,13 +4,13 @@ Proxy server to support R5 Subscription Backport on EHR servers which do not imp
 
 ## Running the Server
 
-The Subscription Proxy server is built on top of [Asymmetrik Node FHIR Sever](https://github.com/Asymmetrik/node-fhir-server-core). NodeJS and Yarn are required to run the app.
+The Subscription Proxy server is built on top of [Asymmetrik Node FHIR Sever](https://github.com/Asymmetrik/node-fhir-server-core). NodeJS/npm required to run the app.
 
 ```sh
 git clone git@github.com:mcode/subscription-proxy.git
 cd subscription-proxy
-yarn install
-yarn start
+npm install
+npm start
 ```
 
 With default settings, the app will now be running at `http://localhost:8080`
@@ -36,7 +36,7 @@ fhirServerConfig.security.valueUri: 'SMART Backend Auth token uri'
 
 # License
 
-Copyright 2020 The MITRE Corporation
+Copyright 2020-2021 The MITRE Corporation
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
