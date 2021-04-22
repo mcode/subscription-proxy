@@ -15,8 +15,10 @@ module.exports.topiclist = (_args, _context) => {
   });
 };
 
-module.exports.status = (_args, { req }) => {
-  // TODO: validate authorization header is allowed to access this subscription
+module.exports.status = (_args, _context) => {
+  // TODO: there is no way with our current access token to determine which
+  //  subscriptions the user should have access to. If they have an access
+  //  token they can see everything
   logger.info('Running Subscription $status operation');
   return new Promise((resolve, _reject) => {
     const parameters = [];
@@ -29,9 +31,10 @@ module.exports.status = (_args, { req }) => {
   });
 };
 
-module.exports.statusById = ({ id }, { req }) => {
-  console.log(req.headers);
-  // TODO: validate authorization header is allowed to access this subscription
+module.exports.statusById = ({ id }, _context) => {
+  // TODO: there is no way with our current access token to determine which
+  //  subscriptions the user should have access to. If they have an access
+  //  token they can see everything
   logger.info('Running Subscription $status by ID operation');
   return new Promise((resolve, reject) => {
     const result = db.select(SUBSCRIPTION, (r) => r.id === id);
