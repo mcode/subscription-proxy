@@ -34,7 +34,7 @@ let fhirServerConfig = raw({
     level: 'debug',
   },
   // Interval(in minutes) to poll for subscription topics
-  pollingInterval: 1,
+  pollingInterval: 0.25,
   //
   // If you want to set up conformance statement with security enabled
   // Uncomment the following block
@@ -135,6 +135,20 @@ let fhirServerConfig = raw({
           method: 'GET',
           reference:
             'http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/Backport-subscriptiontopic-list',
+        },
+        {
+          name: 'status',
+          route: '/$status',
+          method: 'GET',
+          reference:
+            'http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-status',
+        },
+        {
+          name: 'status-by-id',
+          route: '/:id/$status',
+          method: 'GET',
+          reference:
+            'http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-status',
         },
       ],
     },

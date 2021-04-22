@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../storage/DataAccess');
 const topiclist = require('../../public/topiclist.json');
 const { initialPoll } = require('../utils/polling');
+const { createSubscriptionStatus, createStatusBundle } = require('../utils/subscriptions');
 
 const logger = loggers.get('default');
 const SUBSCRIPTION = 'subscriptions';
@@ -11,6 +12,34 @@ module.exports.topiclist = (_args, _context) => {
   logger.info('Running Subsription $topic-list operation');
   return new Promise((resolve, _reject) => {
     resolve(topiclist);
+  });
+};
+
+module.exports.status = (_args, { req }) => {
+  // TODO: validate authorization header is allowed to access this subscription
+  logger.info('Running Subscription $status operation');
+  return new Promise((resolve, _reject) => {
+    const parameters = [];
+    const result = db.select(SUBSCRIPTION, () => true);
+    for (const subscription of result) {
+      parameters.push(createSubscriptionStatus(subscription, 'query-status'));
+    }
+    const bundle = createStatusBundle(parameters);
+    resolve(bundle);
+  });
+};
+
+module.exports.statusById = ({ id }, { req }) => {
+  console.log(req.headers);
+  // TODO: validate authorization header is allowed to access this subscription
+  logger.info('Running Subscription $status by ID operation');
+  return new Promise((resolve, reject) => {
+    const result = db.select(SUBSCRIPTION, (r) => r.id === id);
+    if (result.length >= 1) {
+      const subscription = result[0];
+      const parameters = [createSubscriptionStatus(subscription, 'query-status')];
+      resolve(createStatusBundle(parameters));
+    } else reject({ message: `Subscription/${id} does not exist` });
   });
 };
 
@@ -45,6 +74,8 @@ module.exports.create = (_args, { req }) => {
       return;
     }
     if (!resource.id) resource.id = uuidv4();
+    resource.status = 'active';
+    resource.numEventsSinceStart = 0;
     db.insert(SUBSCRIPTION, resource);
 
     // Initial poll for new subscription
@@ -74,6 +105,8 @@ module.exports.update = (args, { req }) => {
       reject({ message: 'Query Param id and Subscription.id must match' });
       return;
     }
+    resource.status = 'active';
+    resource.numEventsSinceStart = 0;
     db.upsert(SUBSCRIPTION, resource, (r) => r.id === id);
     resolve({ id: id });
   });
