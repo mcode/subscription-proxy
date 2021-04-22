@@ -41,7 +41,7 @@ function createSubscriptionStatus(subscription, type, events) {
       },
       {
         name: 'status',
-        valueCanonical: subscription.status,
+        valueCode: subscription.status,
       },
       {
         name: 'type',
