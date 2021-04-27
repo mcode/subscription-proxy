@@ -14,12 +14,13 @@ const BACKPORT_TOPIC_EXTENSION =
  *
  * @param {Subscription} subscription - the subscription to get the status of
  * @param {string} type - 'handshake', 'heartbeat', 'event-notification', or 'query-status'
+ * @param {number} events - number of events in notification
  * @returns Parameters resource defining the status of the subscription
  */
-function createSubscriptionStatus(subscription, type) {
+function createSubscriptionStatus(subscription, type, events) {
   const topicExtension = subscription.extension.find((e) => e.url === BACKPORT_TOPIC_EXTENSION);
 
-  return {
+  const parameters = {
     resourceType: 'Parameters',
     id: uuidv4(),
     meta: {
@@ -39,10 +40,46 @@ function createSubscriptionStatus(subscription, type) {
         valueCanonical: topicExtension.valueUri,
       },
       {
+        name: 'status',
+        valueCode: subscription.status,
+      },
+      {
         name: 'type',
         valueCode: type,
       },
+      {
+        name: 'events-since-subscription-start',
+        valueUnsignedInt: subscription.numEventsSinceStart,
+      },
     ],
+  };
+
+  if (events) {
+    parameters.parameter.push({
+      name: 'events-in-notification',
+      valueUnsignedInt: events,
+    });
+  }
+
+  return parameters;
+}
+
+/**
+ * Produce a searchset Bundle with each parameter as an entry
+ *
+ * @param {Parameter[]} parameters - list of parameter resources
+ * @returns Searchset Bundle (output for $status operation)
+ */
+function createStatusBundle(parameters) {
+  return {
+    resourceType: 'Bundle',
+    type: 'searchset',
+    entry: parameters.map((parameter) => {
+      return {
+        fullUrl: `${fhirServerConfig.auth.resourceServer}/Parameters/${parameter.id}`,
+        resource: parameter,
+      };
+    }),
   };
 }
 
@@ -54,7 +91,19 @@ function createSubscriptionStatus(subscription, type) {
  * @returns axios post promise
  */
 function sendNotification(resources, subscription) {
-  const subscriptionStatus = createSubscriptionStatus(subscription);
+  // Update number events since start
+  subscription.numEventsSinceStart += resources.length;
+  db.update(
+    SUBSCRIPTION,
+    (s) => s.id === subscription.id,
+    (s) => Object.assign(s, subscription)
+  );
+
+  const subscriptionStatus = createSubscriptionStatus(
+    subscription,
+    'event-notification',
+    resources.length
+  );
 
   const notificationBundle = {
     resourceType: 'Bundle',
@@ -96,7 +145,16 @@ function sendNotification(resources, subscription) {
     headers[name] = value;
   });
 
-  return axios.post(subscription.channel.endpoint, notificationBundle, { headers: headers });
+  return axios
+    .post(subscription.channel.endpoint, notificationBundle, { headers: headers })
+    .catch(() => {
+      subscription.status = 'error';
+      db.update(
+        SUBSCRIPTION,
+        (s) => s.id === subscription.id,
+        (s) => Object.assign(s, subscription)
+      );
+    });
 }
 
-module.exports = { sendNotification, createSubscriptionStatus };
+module.exports = { sendNotification, createSubscriptionStatus, createStatusBundle };

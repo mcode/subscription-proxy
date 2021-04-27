@@ -136,6 +136,20 @@ let fhirServerConfig = raw({
           reference:
             'http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/Backport-subscriptiontopic-list',
         },
+        {
+          name: 'status',
+          route: '/$status',
+          method: 'GET',
+          reference:
+            'http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-status',
+        },
+        {
+          name: 'status-by-id',
+          route: '/:id/$status',
+          method: 'GET',
+          reference:
+            'http://hl7.org/fhir/uv/subscriptions-backport/OperationDefinition/backport-subscription-status',
+        },
       ],
     },
   },
