@@ -76,7 +76,8 @@ let build = function (server) {
     var fhirClient = mkFhir({
       baseUrl: fhirClientConfig.baseUrl,
     });
-    fhirClient.conformance(fhirClientConfig).then((response) => {
+    const fcc = { ...fhirClientConfig };
+    fhirClient.conformance(fcc).then((response) => {
       let uris = authUris(response);
       request.post({ url: uris.token, form: req.body }, (err, httpResponse, body) => {
         if (err) {
