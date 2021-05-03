@@ -136,10 +136,9 @@ async function initialPoll(subscription) {
     return;
   }
 
-  const { baseUrl, clientId } = fhirClientConfig;
-  const accessToken = await getAccessToken(baseUrl, clientId);
+  const accessToken = await getAccessToken(fhirClientConfig);
   const options = {
-    baseUrl,
+    baseUrl: fhirClientConfig.baseUrl,
     auth: { bearer: accessToken },
   };
 
@@ -193,11 +192,10 @@ async function pollSubscriptionTopics() {
     return;
   }
 
-  const { baseUrl, clientId } = fhirClientConfig;
-  const accessToken = await getAccessToken(baseUrl, clientId);
+  const accessToken = await getAccessToken(fhirClientConfig);
   resourcesToPoll.forEach((resourceToPoll) => {
     const options = {
-      baseUrl,
+      baseUrl: fhirClientConfig.baseUrl,
       auth: { bearer: accessToken },
     };
 

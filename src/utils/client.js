@@ -46,16 +46,18 @@ async function generateJWT(client_id, aud) {
  * Generate and return access token for the specified server. If tokenEndpoint
  * is provided it will use that, otherwise it will query the smart configuration.
  *
- * @param {string} url  the fhir base url for the server to connect to
+ * @param {object} config  configuration options for the server to connect to
  * @returns access token.
  */
-async function connectToServer(url, clientId) {
+async function connectToServer(config) {
+  const { baseUrl, clientId, secret, customScopes } = config;
   // Generate the client_assertion jwt
-  const tokenEndpoint = await getTokenEndpoint(url);
+  const tokenEndpoint = await getTokenEndpoint(baseUrl);
+
   const jwt = await generateJWT(clientId, tokenEndpoint);
 
   const props = {
-    scope: 'system/*.read',
+    scope: customScopes || 'system/*.read',
     grant_type: 'client_credentials',
     client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
     client_assertion: jwt
@@ -70,6 +72,16 @@ async function connectToServer(url, clientId) {
     }
   };
 
+  if (secret) {
+    delete props.client_assertion_type;
+    delete props.client_assertion;
+
+    const rawCredential = `${clientId}:${secret}`;
+    const base64 = Buffer.from(rawCredential, 'binary').toString('base64');
+
+    headers.headers.Authorization = `Basic ${base64}`;
+  }
+
   // Get access token from auth server
   const data = await axios
     .post(tokenEndpoint, queryString.stringify(props), headers)
@@ -81,12 +93,11 @@ async function connectToServer(url, clientId) {
 /**
  * Function to get an access token for the authorization header of request
  *
- * @param {string} url - the base url of the server to connect to
- * @param {string} clientId - The identifier of the client on the remote server
+ * @param {object} config  configuration options for the server to connect to
  */
-async function getAccessToken(url, clientId) {
+async function getAccessToken(config) {
   try {
-    const token = await connectToServer(url, clientId);
+    const token = await connectToServer(config);
     return token.access_token;
   } catch (e) {
     throw e;
