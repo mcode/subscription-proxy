@@ -14,8 +14,29 @@ const logger = loggers.get('default');
  * @returns token_endpoint
  */
 async function getTokenEndpoint(url) {
-  const response = await axios.get(`${url}/.well-known/smart-configuration`);
-  return response.data.token_endpoint;
+  try {
+    const response = await axios.get(`${url}/.well-known/smart-configuration`);
+    return response.data.token_endpoint;
+  } catch (ex) {
+    try {
+      // sometimes the smart-config is in a non-standard place,
+      // so let's try the server capability statement
+      const response = await axios.get(`${url}/metadata`);
+
+      const rest = response.data.rest;
+      const serverRest = rest.find(r => r.mode === 'server');
+      const extensions = serverRest.security.extension;
+      const oauth = extensions.find(
+        e => e.url === 'http://fhir-registry.smarthealthit.org/StructureDefinition/oauth-uris'
+      );
+      return oauth.extension.find(e => e.url === 'token').valueUri;
+    } catch (ex2) {
+      // not sure what to do if both fail?
+      logger.error(ex);
+      logger.error(ex2);
+      throw ex2;
+    }
+  }
 }
 
 /**
@@ -46,16 +67,18 @@ async function generateJWT(client_id, aud) {
  * Generate and return access token for the specified server. If tokenEndpoint
  * is provided it will use that, otherwise it will query the smart configuration.
  *
- * @param {string} url  the fhir base url for the server to connect to
+ * @param {object} config  configuration options for the server to connect to
  * @returns access token.
  */
-async function connectToServer(url, clientId) {
+async function connectToServer(config) {
+  const { baseUrl, clientId, secret, customScopes } = config;
   // Generate the client_assertion jwt
-  const tokenEndpoint = await getTokenEndpoint(url);
+  const tokenEndpoint = await getTokenEndpoint(baseUrl);
+
   const jwt = await generateJWT(clientId, tokenEndpoint);
 
   const props = {
-    scope: 'system/*.read',
+    scope: customScopes || 'system/*.read',
     grant_type: 'client_credentials',
     client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
     client_assertion: jwt
@@ -70,6 +93,16 @@ async function connectToServer(url, clientId) {
     }
   };
 
+  if (secret) {
+    delete props.client_assertion_type;
+    delete props.client_assertion;
+
+    const rawCredential = `${clientId}:${secret}`;
+    const base64 = Buffer.from(rawCredential, 'binary').toString('base64');
+
+    headers.headers.Authorization = `Basic ${base64}`;
+  }
+
   // Get access token from auth server
   const data = await axios
     .post(tokenEndpoint, queryString.stringify(props), headers)
@@ -81,12 +114,11 @@ async function connectToServer(url, clientId) {
 /**
  * Function to get an access token for the authorization header of request
  *
- * @param {string} url - the base url of the server to connect to
- * @param {string} clientId - The identifier of the client on the remote server
+ * @param {object} config  configuration options for the server to connect to
  */
-async function getAccessToken(url, clientId) {
+async function getAccessToken(config) {
   try {
-    const token = await connectToServer(url, clientId);
+    const token = await connectToServer(config);
     return token.access_token;
   } catch (e) {
     throw e;
