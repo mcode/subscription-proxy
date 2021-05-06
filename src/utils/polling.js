@@ -3,100 +3,66 @@ const mkFhir = require('fhir.js');
 const config = require('config');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../storage/DataAccess');
-const topiclist = require('../../public/topiclist.json');
+const hash = require('object-hash');
 const { getAccessToken } = require('./client');
 const { sendNotification } = require('./subscriptions');
 
 const logger = loggers.get('default');
 const SUBSCRIPTION = 'subscriptions';
+const SUBSCRIPTION_TOPIC = 'subscriptiontopics';
 const fhirClientConfig = config.fhirClientConfig;
 
-const TOPIC_URL = 'http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-topic-canonical';
+const TOPIC_URL =
+  'http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-topic-canonical';
 
 /**
- * @param {String} resourceToPoll - resource to query for
+ * @param {Object} resourceTrigger - the SubscriptionTopic.resourceTrigger this poll is for
  * @param {String} lastUpdated - date to query resources since they were last updated
  * @returns {Object} - returns a FHIR search query object
  */
-function getSearchQuery(resourceToPoll, lastUpdated) {
+function getSearchQuery(resourceTrigger, lastUpdated) {
   const query = {};
   if (lastUpdated) query._lastUpdated = `gt${lastUpdated}`;
-  if (resourceToPoll === 'Observation') query.category = 'laboratory';
-
-  return { type: resourceToPoll, query};
-}
-
-/**
- * Take a named event code and return the resource type the named event will subscribe to.
- * This is not quite the Subscription.criteria string but will be used to construct that.
- *
- * @param {string} namedEvent - the named event code
- * @returns the resource type which will trigger a notification for the named event
- */
-function namedEventToResourceType(namedEvent) {
-  const parts = namedEvent.split('-');
-
-  let resource;
-  if (parts[0] === 'new' || parts[0] === 'modified') resource = parts[1];
-  else if (parts[1] === 'change' || parts[1] === 'start' || parts[1] === 'close')
-    resource = parts[0];
-  else return null;
-
-  switch (resource) {
-    case 'encounter':
-      return 'Encounter';
-    case 'diagnosis':
-      return 'Condition';
-    case 'medication':
-      return 'Medication';
-    case 'labresult':
-      return 'Observation';
-    case 'order':
-      return 'ServiceRequest';
-    case 'procedure':
-      return 'Procedure';
-    case 'immunization':
-      return 'Immunization';
-    case 'demographic':
-      return 'Patient';
-    default:
-      return null;
+  if (resourceTrigger.queryCriteria?.current) {
+    const criteria = resourceTrigger.queryCriteria.current.split('&');
+    criteria.forEach((c) => {
+      const [key, value] = c.split('=');
+      query[key] = value;
+    });
   }
-}
 
-/**
- * Returns topic name from Subscription
- *
- * @param {Subscription} subscription - Subscription resource
- * @returns {String | null} - topic name
- */
-function getTopicName(subscription) {
-  if (!subscription.extension) return null;
-
-  const topicExtension = subscription.extension.find((e) => e.url === TOPIC_URL);
-  return !topicExtension ? null : topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
+  return { type: resourceTrigger.resourceType, query };
 }
 
 /**
  * Sends notifications(if necessary) each subscription based on new and modified resources
  *
  * @param {Subscription[]} subscriptions List of Subscriptions
+ * @param {String} resourceType the type of the triggering resource(s)
  * @param {Resource[]} newResources List of new resources polled from EHR
  * @param {Resource[]} modifiedResources List of modified resources polled from EHR
  */
-function sendSubscriptionNotifications(subscriptions, newResources, modifiedResources) {
+function sendSubscriptionNotifications(
+  subscriptions,
+  resourceType,
+  newResources,
+  modifiedResources
+) {
   subscriptions.forEach((sub) => {
-    const topicName = getTopicName(sub);
+    const topic = getSubscriptionTopic(sub);
+    const methodCriteria = getTopicMethodCriteria(topic, resourceType);
+    const allResources = newResources.concat(modifiedResources);
 
-    if (topicName.includes('new') && newResources.length > 0) {
-      logger.info(`Sending notification for ${topicName}`);
+    if (allResources.length && (!methodCriteria || methodCriteria.includes('update'))) {
+      // Send notification with all resources
+      logger.info(`Sending notification to Subscription/${sub.id} for topic ${topic.title}`);
+      sendNotification(allResources, sub);
+    } else if (newResources.length && methodCriteria.includes('create')) {
+      // Send notification with only new resources
+      logger.info(`Sending notification to Subscription/${sub.id} for topic ${topic.title}`);
       sendNotification(newResources, sub);
-    } else if (topicName.includes('modified') && modifiedResources.length > 0) {
-      logger.info(`Sending notification for ${topicName}`);
-      sendNotification(modifiedResources, sub);
-    } else if (topicName.includes('change') && (newResources.length > 0 || modifiedResources.length > 0)) {
-      logger.info(`Sending notification for ${topicName}`);
-      sendNotification(newResources.concat(modifiedResources), sub);
+    } else if (methodCriteria.includes('delete')) {
+      logger.error('Delete methodCriteria not implemented.');
     }
   });
 }
@@ -104,15 +70,47 @@ function sendSubscriptionNotifications(subscriptions, newResources, modifiedReso
 /**
  * Adds poll to DB
  *
- * @param {Resource} resource - Resource
+ * @param {string} hashKey - the hash key of the ResourceTrigger
  */
-function addPollToDb(resource) {
+function addPollToDb(hashKey) {
   const poll = {
     id: uuidv4(),
     timestamp: new Date().toISOString(),
-    resource,
+    hash: hashKey,
   };
-  db.upsert('polling', poll, (p) => p.resource === resource);
+  db.upsert('polling', poll, (p) => p.hash === hashKey);
+}
+
+/**
+ * Save the fetched resources to the database and determine which ones are new vs modified.
+ *
+ * @param {Object} data - fhirClient return data
+ * @param {Object} resourceTrigger - the resource trigger which resulted in this poll
+ * @returns JSON object containing newResources and modifiedResources lists
+ */
+function storeFetchedResources(data, resourceTrigger) {
+  const newResources = [];
+  const modifiedResources = [];
+
+  logger.info(
+    `Storing ${data.total} fetched ${resourceTrigger.resourceType} resource(s) for ${hash(
+      resourceTrigger
+    )} resourceTrigger into database.`
+  );
+  const resources = data.entry.map((entry) => entry.resource);
+
+  resources.forEach((resource) => {
+    const collection = `${resource.resourceType.toLowerCase()}s`;
+
+    // Determine if resource is new before inserting
+    const storedResource = db.select(collection, (r) => r.id === resource.id);
+    if (storedResource.length === 0) newResources.push(resource);
+    else modifiedResources.push(resource);
+
+    db.upsert(collection, { id: resource.id }, (r) => r.id === resource.id);
+  });
+
+  return { newResources, modifiedResources };
 }
 
 /**
@@ -121,46 +119,63 @@ function addPollToDb(resource) {
  * @param {Subscription} subscription - Subscription resource
  */
 async function initialPoll(subscription) {
-  const topicName = getTopicName(subscription);
-  if (!topicName) {
-    logger.info('Initial poll not needed for subscription without topic.');
-    return;
-  }
+  const subscriptionTopic = getSubscriptionTopic(subscription);
 
-  const resourceToPoll = namedEventToResourceType(topicName);
-
-  // Don't poll if resource is already being polled for.
-  const mostRecentPoll = db.select('polling', (p) => p.resource === resourceToPoll);
-  if (mostRecentPoll.length > 0) {
-    logger.info(`${resourceToPoll} resource is already being polled.`);
-    return;
-  }
-
+  // Make the fhirClient
   const accessToken = await getAccessToken(fhirClientConfig);
   const options = {
     baseUrl: fhirClientConfig.baseUrl,
     auth: { bearer: accessToken },
   };
-
   const fhirClient = mkFhir(options);
-  fhirClient
-    .search(getSearchQuery(resourceToPoll))
-    .then((response) => {
-      const { data } = response;
-      addPollToDb(resourceToPoll);
 
-      // Store fetched resources in local database
-      if (data.total > 0) {
-        logger.info(`Storing ${data.total} fetched resource(s) for ${resourceToPoll} into database.`);
-        const resources = data.entry.map(entry => entry.resource);
+  subscriptionTopic.resourceTrigger.forEach((resourceTrigger) => {
+    // Don't poll if resource is already being polled for.
+    const triggerHash = hash(resourceTrigger);
+    const mostRecentPoll = db.select('polling', (p) => p.hash === triggerHash);
+    if (mostRecentPoll.length > 0) {
+      logger.info(`${resourceToPoll} resource is already being polled.`);
+      return;
+    }
 
-        resources.forEach((resource) => {
-          const collection = `${resource.resourceType.toLowerCase()}s`;
-          db.upsert(collection, { id: resource.id }, r => r.id === resource.id);
-        });
-      }
-    })
-    .catch((err) => logger.error(err));
+    fhirClient
+      .search(getSearchQuery(resourceTrigger))
+      .then((response) => {
+        const { data } = response;
+        addPollToDb(triggerHash);
+
+        if (data.total > 0) storeFetchedResources(data, resourceTrigger);
+      })
+      .catch((err) => logger.error(err));
+  });
+}
+
+/**
+ * Get the topic the subscription is subscribed to
+ *
+ * @param {Subscription} subscription - the subscription to get the topic from
+ * @returns {SubscriptionTopic | null} topic if found, otherwise null
+ */
+function getSubscriptionTopic(subscription) {
+  const topicExtension = subscription.extension.find((e) => e.url === TOPIC_URL);
+  if (!topicExtension) return null;
+  const topicUrl = topicExtension.valueUri;
+  const topic = db.select(SUBSCRIPTION_TOPIC, (t) => t.url === topicUrl);
+  return topic.length ? topic[0] : null;
+}
+
+/**
+ * Get the methodCriteria from the resourceTrigger of resourceType in the topic
+ *
+ * @param {SubscriptionTopic} topic - the Topic to get the method criteria from
+ * @param {String} resourceType - the resource type for the trigger to get the method criteria from
+ * @returns {String[] | null} list of method criteria if found, otherwise null
+ */
+function getTopicMethodCriteria(topic, resourceType) {
+  const resourceTrigger = topic.resourceTrigger.find(
+    (trigger) => trigger.resourceType === resourceType
+  );
+  return resourceTrigger?.methodCriteria ? resourceTrigger.methodCriteria : null;
 }
 
 /**
@@ -169,70 +184,67 @@ async function initialPoll(subscription) {
 async function pollSubscriptionTopics() {
   logger.info('Polling Subscription topics');
 
-  // Get subscriptions with topics
+  // Get Subscriptions with topics
   const subscriptions = db.select(
     SUBSCRIPTION,
-    (s) => s.extension && s.extension.some((e) => e.url === TOPIC_URL)
+    (s) => s.status === 'active' && s.extension && s.extension.some((e) => e.url === TOPIC_URL)
   );
 
-  // Map topics to resources and remove duplicates with Set so we only poll once for each resource
-  const resourcesToPoll = [
-    ...new Set(
-      subscriptions
-        .map((s) => {
-          const topicExtension = s.extension.find((e) => e.url === TOPIC_URL);
-          return topiclist.parameter.find((p) => p.valueCanonical === topicExtension.valueUri).name;
-        })
-        .map((t) => namedEventToResourceType(t))
-    ),
+  // Get the unique SubscriptionTopics from active Subscriptions
+  const subscriptionTopicsToPoll = [
+    ...new Set(subscriptions.flatMap((s) => getSubscriptionTopic(s))),
   ];
 
-  if (resourcesToPoll.length === 0) {
+  // Get the unique ResourceTriggers from SubscriptionTopics
+  const resourceTriggersToPoll = [
+    ...new Set(subscriptionTopicsToPoll.flatMap((t) => t.resourceTrigger)),
+  ];
+
+  if (resourceTriggersToPoll.length === 0) {
     logger.info('No subscription topics to poll.');
     return;
   }
 
+  // Create the fhirClient
   const accessToken = await getAccessToken(fhirClientConfig);
-  resourcesToPoll.forEach((resourceToPoll) => {
-    const options = {
-      baseUrl: fhirClientConfig.baseUrl,
-      auth: { bearer: accessToken },
-    };
+  const options = {
+    baseUrl: fhirClientConfig.baseUrl,
+    auth: { bearer: accessToken },
+  };
+  const fhirClient = mkFhir(options);
 
-    const mostRecentPoll = db.select('polling', (p) => p.resource === resourceToPoll);
+  resourceTriggersToPoll.forEach((resourceTrigger) => {
+    const triggerHash = hash(resourceTrigger);
+    const mostRecentPoll = db.select('polling', (p) => p.hash === triggerHash);
     const lastUpdated = mostRecentPoll.length === 0 ? null : mostRecentPoll[0].timestamp;
-    logger.info(`Polling EHR for ${resourceToPoll} resources last updated since ${lastUpdated}.`);
-    const fhirClient = mkFhir(options);
+    logger.info(
+      `Polling EHR for ${resourceTrigger.resourceType} resources for ${triggerHash} resourceTrigger last updated since ${lastUpdated}.`
+    );
     fhirClient
-      .search(getSearchQuery(resourceToPoll, lastUpdated))
+      .search(getSearchQuery(resourceTrigger, lastUpdated))
       .then((response) => {
         const { data } = response;
-        addPollToDb(resourceToPoll);
-        const newResources = [];
-        const modifiedResources = [];
+        addPollToDb(triggerHash);
 
-        // Store fetched resources in local database
         if (data.total > 0) {
-          logger.info(`Storing ${data.total} fetched resource(s) for ${resourceToPoll} into database.`);
-          const resources = data.entry.map(entry => entry.resource);
+          const { newResources, modifiedResources } = storeFetchedResources(data, resourceTrigger);
 
-          resources.forEach((resource) => {
-            const collection = `${resource.resourceType.toLowerCase()}s`;
-
-            // Determine if resource is new before inserting
-            const storedResource = db.select(collection, r => r.id === resource.id);
-            if (storedResource.length === 0) newResources.push(resource);
-            else modifiedResources.push(resource);
-
-            db.upsert(collection, { id: resource.id }, r => r.id === resource.id);
+          // Filter subscriptions that are looking for changes in the currently polled resource trigger
+          const subscriptionsToNotify = subscriptions.filter((s) => {
+            const topic = getSubscriptionTopic(s);
+            const resourceTriggersHashKeys = topic.resourceTrigger.map((rt) => hash(rt));
+            return resourceTriggersHashKeys.includes(triggerHash) ? true : false;
           });
-        }
 
-        // Filter subscriptions that are looking for changes in the currently polled resource
-        const filteredSubscriptions = subscriptions.filter(s => namedEventToResourceType(getTopicName(s)) === resourceToPoll);
-        sendSubscriptionNotifications(filteredSubscriptions, newResources, modifiedResources);
+          sendSubscriptionNotifications(
+            subscriptionsToNotify,
+            resourceTrigger.resourceType,
+            newResources,
+            modifiedResources
+          );
+        }
       })
-      .catch((err) => logger.error(err));
+      .catch((err) => logger.error(err.message));
   });
 }
 

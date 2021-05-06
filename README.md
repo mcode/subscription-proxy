@@ -34,6 +34,53 @@ fhirServerConfig.server.port: 'the port to run this server on'
 fhirServerConfig.security.valueUri: 'SMART Backend Auth token uri'
 ```
 
+# SubscriptionTopics
+
+This server supports the R5 Subscription Backport IG which means it must have some notion of Subscription Topics. To keep this generalized there is minimal support for the R5 SubscriptionTopic resource.
+
+## Subscription Topic Structure
+
+Since this is an R4 server but SubscriptionTopics are defined in R5 the following schema is used. The schema below attempts to follow the R5 SubscriptionTopic resource as closely as possible, but the resource is subject to change while it is being balloted. The schema below includes only the triggers this server supports. As new triggers from the SubscriptionTopic resource are supported they should be added here.
+
+```
+{
+    id: String // unique id
+    url: String // The canonical url of the topic (becomes valueCanonical in $topiclist)
+    title: String // The name of the topic (becomes name in $topiclist)
+    resourceTrigger: [
+        {
+            resourceType: String // Resources to trigger on
+            methodCriteria: ('create' | 'update' | 'delete')[] // Type of request to triger on
+            queryCriteria: {
+                current: String // Criteria the resource must current match on trigger
+            }
+        }
+    ]
+}
+```
+
+## Add or Update Topics
+
+To add or update topics to this server POST a JSON list of topics to `{baseUrl}/SubscriptionTopics`. Note this does not include the `/4_0_0` route.
+
+Example:
+``
+HTTP POST /SubscriptionTopics
+[ 
+    {
+        "id": "1",
+        "url": "http://example.org/medmorph/subscriptiontopic/demographic-change",
+        "title": "demographic-change",
+        "resourceTrigger": [
+            {
+                "resourceType": "Patient",
+                "methodCriteria": [ "create", "update" ]
+            }
+        ]
+    }
+]
+```
+
 # License
 
 Copyright 2020-2021 The MITRE Corporation
