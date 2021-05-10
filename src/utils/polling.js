@@ -23,7 +23,7 @@ const TOPIC_URL =
 function getSearchQuery(resourceTrigger, lastUpdated) {
   const query = {};
   if (lastUpdated) query._lastUpdated = `gt${lastUpdated}`;
-  if (resourceTrigger.queryCriteria?.current) {
+  if (resourceTrigger.queryCriteria && resourceTrigger.queryCriteria.current) {
     const criteria = resourceTrigger.queryCriteria.current.split('&');
     criteria.forEach((c) => {
       const [key, value] = c.split('=');
@@ -32,39 +32,6 @@ function getSearchQuery(resourceTrigger, lastUpdated) {
   }
 
   return { type: resourceTrigger.resourceType, query };
-}
-
-/**
- * Sends notifications(if necessary) each subscription based on new and modified resources
- *
- * @param {Subscription[]} subscriptions List of Subscriptions
- * @param {String} resourceType the type of the triggering resource(s)
- * @param {Resource[]} newResources List of new resources polled from EHR
- * @param {Resource[]} modifiedResources List of modified resources polled from EHR
- */
-function sendSubscriptionNotifications(
-  subscriptions,
-  resourceType,
-  newResources,
-  modifiedResources
-) {
-  subscriptions.forEach((sub) => {
-    const topic = getSubscriptionTopic(sub);
-    const methodCriteria = getTopicMethodCriteria(topic, resourceType);
-    const allResources = newResources.concat(modifiedResources);
-
-    if (allResources.length && (!methodCriteria || methodCriteria.includes('update'))) {
-      // Send notification with all resources
-      logger.info(`Sending notification to Subscription/${sub.id} for topic ${topic.title}`);
-      sendNotification(allResources, sub);
-    } else if (newResources.length && methodCriteria.includes('create')) {
-      // Send notification with only new resources
-      logger.info(`Sending notification to Subscription/${sub.id} for topic ${topic.title}`);
-      sendNotification(newResources, sub);
-    } else if (methodCriteria.includes('delete')) {
-      logger.error('Delete methodCriteria not implemented.');
-    }
-  });
 }
 
 /**
@@ -114,6 +81,20 @@ function storeFetchedResources(data, resourceTrigger) {
 }
 
 /**
+ * Get the topic the subscription is subscribed to
+ *
+ * @param {Subscription} subscription - the subscription to get the topic from
+ * @returns {SubscriptionTopic | null} topic if found, otherwise null
+ */
+function getSubscriptionTopic(subscription) {
+  const topicExtension = subscription.extension.find((e) => e.url === TOPIC_URL);
+  if (!topicExtension) return null;
+  const topicUrl = topicExtension.valueUri;
+  const topic = db.select(SUBSCRIPTION_TOPIC, (t) => t.url === topicUrl);
+  return topic.length ? topic[0] : null;
+}
+
+/**
  * Perform an initial poll if resource has not already been polled
  *
  * @param {Subscription} subscription - Subscription resource
@@ -134,7 +115,7 @@ async function initialPoll(subscription) {
     const triggerHash = hash(resourceTrigger);
     const mostRecentPoll = db.select('polling', (p) => p.hash === triggerHash);
     if (mostRecentPoll.length > 0) {
-      logger.info(`${resourceToPoll} resource is already being polled.`);
+      logger.info(`${triggerHash} trigger is already being polled.`);
       return;
     }
 
@@ -151,20 +132,6 @@ async function initialPoll(subscription) {
 }
 
 /**
- * Get the topic the subscription is subscribed to
- *
- * @param {Subscription} subscription - the subscription to get the topic from
- * @returns {SubscriptionTopic | null} topic if found, otherwise null
- */
-function getSubscriptionTopic(subscription) {
-  const topicExtension = subscription.extension.find((e) => e.url === TOPIC_URL);
-  if (!topicExtension) return null;
-  const topicUrl = topicExtension.valueUri;
-  const topic = db.select(SUBSCRIPTION_TOPIC, (t) => t.url === topicUrl);
-  return topic.length ? topic[0] : null;
-}
-
-/**
  * Get the methodCriteria from the resourceTrigger of resourceType in the topic
  *
  * @param {SubscriptionTopic} topic - the Topic to get the method criteria from
@@ -175,7 +142,40 @@ function getTopicMethodCriteria(topic, resourceType) {
   const resourceTrigger = topic.resourceTrigger.find(
     (trigger) => trigger.resourceType === resourceType
   );
-  return resourceTrigger?.methodCriteria ? resourceTrigger.methodCriteria : null;
+  return resourceTrigger && resourceTrigger.methodCriteria ? resourceTrigger.methodCriteria : null;
+}
+
+/**
+ * Sends notifications(if necessary) each subscription based on new and modified resources
+ *
+ * @param {Subscription[]} subscriptions List of Subscriptions
+ * @param {String} resourceType the type of the triggering resource(s)
+ * @param {Resource[]} newResources List of new resources polled from EHR
+ * @param {Resource[]} modifiedResources List of modified resources polled from EHR
+ */
+function sendSubscriptionNotifications(
+  subscriptions,
+  resourceType,
+  newResources,
+  modifiedResources
+) {
+  subscriptions.forEach((sub) => {
+    const topic = getSubscriptionTopic(sub);
+    const methodCriteria = getTopicMethodCriteria(topic, resourceType);
+    const allResources = newResources.concat(modifiedResources);
+
+    if (allResources.length && (!methodCriteria || methodCriteria.includes('update'))) {
+      // Send notification with all resources
+      logger.info(`Sending notification to Subscription/${sub.id} for topic ${topic.title}`);
+      sendNotification(allResources, sub);
+    } else if (newResources.length && methodCriteria.includes('create')) {
+      // Send notification with only new resources
+      logger.info(`Sending notification to Subscription/${sub.id} for topic ${topic.title}`);
+      sendNotification(newResources, sub);
+    } else if (methodCriteria.includes('delete')) {
+      logger.error('Delete methodCriteria not implemented.');
+    }
+  });
 }
 
 /**
