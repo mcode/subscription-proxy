@@ -64,7 +64,7 @@ Since this is an R4 server but SubscriptionTopics are defined in R5 the followin
 To add or update topics to this server POST a JSON list of topics to `{baseUrl}/SubscriptionTopics`. Note this does not include the `/4_0_0` route.
 
 Example:
-``
+```
 HTTP POST /SubscriptionTopics
 [ 
     {
@@ -80,6 +80,8 @@ HTTP POST /SubscriptionTopics
     }
 ]
 ```
+
+A list of all the MedMorph SubscriptionTopics is available in `public/topics.json`. This file can be used as the body of a POST request to automatically add all of the MedMorph topics to the server.
 
 # License
 

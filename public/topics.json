@@ -1,0 +1,172 @@
+[
+    {
+        "title": "demographic-change",
+        "url": "http://example.org/medmorph/subscriptiontopic/demographic-change",
+        "resourceTrigger": [
+            {
+                "resourceType": "Patient",
+                "methodCriteria": ["update"]
+            }
+        ]
+    },
+    {
+        "title": "encounter-change",
+        "url": "http://example.org/medmorph/subscriptiontopic/encounter-change",
+        "resourceTrigger": [
+            {
+                "resourceType": "Encounter",
+                "methodCriteria": ["update"]
+            }
+        ]
+    },
+    {
+        "title": "diagnosis-change",
+        "url": "http://example.org/medmorph/subscriptiontopic/diagnosis-change",
+        "resourceTrigger": [
+            {
+                "resourceType": "Condition",
+                "methodCriteria": ["update"]
+            }
+        ]
+    },
+    {
+        "title": "medication-change",
+        "url": "http://example.org/medmorph/subscriptiontopic/medication-change",
+        "resourceTrigger": [
+            {
+                "resourceType": "MedicationRequest",
+                "methodCriteria": ["update"]
+            },
+            {
+                "resourceType": "MedicationDispense",
+                "methodCriteria": ["update"]
+            },
+            {
+                "resourceType": "MedicationStatement",
+                "methodCriteria": ["update"]
+            },
+            {
+                "resourceType": "MedicationAdministration",
+                "methodCriteria": ["update"]
+            }
+        ]
+    },
+    {
+        "title": "labresult-change",
+        "url": "http://example.org/medmorph/subscriptiontopic/labresult-change",
+        "resourceTrigger": [
+            {
+                "resourceType": "Observation",
+                "methodCriteria": ["update"],
+                "queryCriteria": {
+                    "current": "category=laboratory"
+                }
+            }
+        ]
+    },
+    {
+        "title": "order-change",
+        "url": "http://example.org/medmorph/subscriptiontopic/order-change",
+        "resourceTrigger": [
+            {
+                "resourceType": "ServiceRequest",
+                "methodCriteria": ["update"]
+            }
+        ]
+    },
+    {
+        "title": "procedure-change",
+        "url": "http://example.org/medmorph/subscriptiontopic/procedure-change",
+        "resourceTrigger": [
+            {
+                "resourceType": "Procedure",
+                "methodCriteria": ["update"]
+            }
+        ]
+    },
+    {
+        "title": "immunization-change",
+        "url": "http://example.org/medmorph/subscriptiontopic/immunization-change",
+        "resourceTrigger": [
+            {
+                "resourceType": "Immunization",
+                "methodCriteria": ["update"]
+            }
+        ]
+    },
+    {
+        "title": "new-diagnosis",
+        "url": "http://example.org/medmorph/subscriptiontopic/new-diagnosis",
+        "resourceTrigger": [
+            {
+                "resourceType": "Condition",
+                "methodCriteria": ["create"]
+            }
+        ]
+    },
+    {
+        "title": "new-medication",
+        "url": "http://example.org/medmorph/subscriptiontopic/new-medication",
+        "resourceTrigger": [
+            {
+                "resourceType": "MedicationRequest",
+                "methodCriteria": ["create"]
+            },
+            {
+                "resourceType": "MedicationDispense",
+                "methodCriteria": ["create"]
+            },
+            {
+                "resourceType": "MedicationStatement",
+                "methodCriteria": ["create"]
+            },
+            {
+                "resourceType": "MedicationAdministration",
+                "methodCriteria": ["create"]
+            }
+        ]
+    },
+    {
+        "title": "new-labresult",
+        "url": "http://example.org/medmorph/subscriptiontopic/new-labresult",
+        "resourceTrigger": [
+            {
+                "resourceType": "Observation",
+                "methodCriteria": ["create"],
+                "queryCriteria": {
+                    "current": "category=laboratory"
+                }
+            }
+        ]
+    },
+    {
+        "title": "new-order",
+        "url": "http://example.org/medmorph/subscriptiontopic/new-order",
+        "resourceTrigger": [
+            {
+                "resourceType": "ServiceRequest",
+                "methodCriteria": ["create"]
+            }
+        ]
+    },
+    {
+        "title": "new-procedure",
+        "url": "http://example.org/medmorph/subscriptiontopic/new-procedure",
+        "resourceTrigger": [
+            {
+                "resourceType": "Procedure",
+                "methodCriteria": ["create"]
+            }
+        ]
+    },
+    {
+        "title": "new-immunization",
+        "url": "http://example.org/medmorph/subscriptiontopic/new-immunization",
+        "resourceTrigger": [
+            {
+                "resourceType": "Immunization",
+                "methodCriteria": ["create"]
+            }
+        ]
+    }
+]
