@@ -1,17 +1,33 @@
 const { loggers } = require('@asymmetrik/node-fhir-server-core');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../storage/DataAccess');
-const topiclist = require('../../public/topiclist.json');
-const { initialPoll } = require('../utils/polling');
+const { initialPoll, getSubscriptionTopic } = require('../utils/polling');
 const { createSubscriptionStatus, createStatusBundle } = require('../utils/subscriptions');
 
 const logger = loggers.get('default');
 const SUBSCRIPTION = 'subscriptions';
+const SUBSCRIPTION_TOPIC = 'subscriptiontopics';
 
 module.exports.topiclist = (_args, _context) => {
   logger.info('Running Subsription $topic-list operation');
   return new Promise((resolve, _reject) => {
-    resolve(topiclist);
+    const subscriptionTopics = db.select(SUBSCRIPTION_TOPIC, () => true);
+    const topicList = {
+      resourceType: 'Parameters',
+      meta: {
+        profile: [
+          'http://hl7.org/fhir/uv/subscriptions-backport/StructureDefinition/backport-subscription-topic-canonical-urls',
+        ],
+      },
+      parameter: [],
+    };
+    subscriptionTopics.forEach((topic) => {
+      topicList.parameter.push({
+        name: topic.title,
+        valueCanonical: topic.url,
+      });
+    });
+    resolve(topicList);
   });
 };
 
@@ -73,6 +89,12 @@ module.exports.create = (_args, { req }) => {
     } else if (!Object.keys(resource).length) {
       reject({
         message: 'Empty body. Make sure Content-Type is set to application/fhir+json',
+      });
+      return;
+    } else if (!getSubscriptionTopic(resource)) {
+      reject({
+        message:
+          'SubscriptionTopic not supported. See Subscription/$topic-list for supported topics',
       });
       return;
     }
