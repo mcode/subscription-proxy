@@ -132,39 +132,24 @@ async function initialPoll(subscription) {
 }
 
 /**
- * Get the methodCriteria from the resourceTrigger of resourceType in the topic
- *
- * @param {SubscriptionTopic} topic - the Topic to get the method criteria from
- * @param {String} resourceType - the resource type for the trigger to get the method criteria from
- * @returns {String[] | null} list of method criteria if found, otherwise null
- */
-function getTopicMethodCriteria(topic, resourceType) {
-  const resourceTrigger = topic.resourceTrigger.find(
-    (trigger) => trigger.resourceType === resourceType
-  );
-  return resourceTrigger && resourceTrigger.methodCriteria ? resourceTrigger.methodCriteria : null;
-}
-
-/**
  * Sends notifications(if necessary) each subscription based on new and modified resources
  *
  * @param {Subscription[]} subscriptions List of Subscriptions
- * @param {String} resourceType the type of the triggering resource(s)
+ * @param {String[]} methodCriteria the method criteria list from the resource trigger
  * @param {Resource[]} newResources List of new resources polled from EHR
  * @param {Resource[]} modifiedResources List of modified resources polled from EHR
  */
 function sendSubscriptionNotifications(
   subscriptions,
-  resourceType,
+  methodCriteria,
   newResources,
   modifiedResources
 ) {
   subscriptions.forEach((sub) => {
     const topic = getSubscriptionTopic(sub);
-    const methodCriteria = getTopicMethodCriteria(topic, resourceType);
     const allResources = newResources.concat(modifiedResources);
 
-    if (allResources.length && (!methodCriteria || methodCriteria.includes('update'))) {
+    if (allResources.length && methodCriteria.includes('update')) {
       // Send notification with all resources
       logger.info(`Sending notification to Subscription/${sub.id} for topic ${topic.title}`);
       sendNotification(allResources, sub);
@@ -238,7 +223,7 @@ async function pollSubscriptionTopics() {
 
           sendSubscriptionNotifications(
             subscriptionsToNotify,
-            resourceTrigger.resourceType,
+            resourceTrigger.methodCriteria,
             newResources,
             modifiedResources
           );

@@ -74,7 +74,7 @@ HTTP POST /SubscriptionTopics
         "resourceTrigger": [
             {
                 "resourceType": "Patient",
-                "methodCriteria": [ "create", "update" ]
+                "methodCriteria": [ "update" ]
             }
         ]
     }
