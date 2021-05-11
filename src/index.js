@@ -30,7 +30,7 @@ const main = function () {
     .setErrorRoutes();
   logger.info('FHIR Server successfully validated.');
   // Start our server
-  server.listen(port, () => logger.info('FHIR Server listening on localhost:' + port)); //
+  server.listen(port, () => logger.info('FHIR Server listening on localhost:' + port));
 
   runWhenDBReady(pollSubscriptionTopics);
   setInterval(pollSubscriptionTopics, fhirServerConfig.pollingInterval * 60 * 1000);
