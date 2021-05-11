@@ -1,7 +1,7 @@
 const { loggers } = require('@asymmetrik/node-fhir-server-core');
 const { v4: uuidv4 } = require('uuid');
 const db = require('../storage/DataAccess');
-const { initialPoll } = require('../utils/polling');
+const { initialPoll, getSubscriptionTopic } = require('../utils/polling');
 const { createSubscriptionStatus, createStatusBundle } = require('../utils/subscriptions');
 
 const logger = loggers.get('default');
@@ -89,6 +89,12 @@ module.exports.create = (_args, { req }) => {
     } else if (!Object.keys(resource).length) {
       reject({
         message: 'Empty body. Make sure Content-Type is set to application/fhir+json',
+      });
+      return;
+    } else if (!getSubscriptionTopic(resource)) {
+      reject({
+        message:
+          'SubscriptionTopic not supported. See Subscription/$topic-list for supported topics',
       });
       return;
     }

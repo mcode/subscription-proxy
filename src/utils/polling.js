@@ -233,4 +233,4 @@ async function pollSubscriptionTopics() {
   });
 }
 
-module.exports = { pollSubscriptionTopics, initialPoll };
+module.exports = { pollSubscriptionTopics, initialPoll, getSubscriptionTopic };
